@@ -89,10 +89,10 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
         # geometry.
 
         input_layer_param = QgsProcessingParameterFeatureSource(
-                self.INPUT_LAYER,
-                self.tr('Input layer'),
-                [QgsProcessing.TypeVectorPolygon]
-            )
+            self.INPUT_LAYER,
+            self.tr('Input layer'),
+            [QgsProcessing.TypeVectorPolygon]
+        )
 
         input_layer_param.setFlags(input_layer_param.flags() | QgsProcessingParameterDefinition.FlagOptional)
 
@@ -101,10 +101,10 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
         )
 
         bbox_param = QgsProcessingParameterString(
-                self.INPUT_BBOX,
-                self.tr('Bounding box (with comma separated)'),
-                defaultValue = ''
-            )
+            self.INPUT_BBOX,
+            self.tr('Bounding box (with comma separated)'),
+            defaultValue=''
+        )
 
         bbox_param.setFlags(bbox_param.flags() | QgsProcessingParameterDefinition.FlagOptional)
 
@@ -167,7 +167,7 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
         type_codes = self.parameterAsString(parameters, self.TYPE_CODES, context).split(",")
         type_codes_values = self.parameterAsString(parameters, self.TYPE_CODES_VALUES, context).split(",")
 
-
+        output = self.parameterAsOutputLayer(parameters, self.OUTPUT, context)
 
         raster_year, raster_month, raster_day = raster_date.date().year(), raster_date.date().month(), raster_date.date().day()
         raster_prd = f"66{str(raster_month).zfill(2)}{str(raster_day).zfill(2)}{raster_year}"
@@ -243,15 +243,14 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
 
         polygonize_results = processing.run('gdal:polygonize', polygonize_params)['OUTPUT']
 
-
-
         extract_by_expression_params = {
             'INPUT': polygonize_results,
             'EXPRESSION': f'"TYPE_CODE"  IN ({",".join(type_codes)})',
             'OUTPUT': 'TEMPORARY_OUTPUT'
         }
 
-        extract_by_expression_results = processing.run('native:extractbyexpression', extract_by_expression_params)['OUTPUT']
+        extract_by_expression_results = processing.run('native:extractbyexpression', extract_by_expression_params)[
+            'OUTPUT']
 
         dissolve_params = {
             'FIELD': 'TYPE_CODE',
@@ -281,8 +280,8 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
             'OUTPUT': 'TEMPORARY_OUTPUT'
         }
 
-        field_calculator_typecode_results = processing.run('native:fieldcalculator', field_calculator_typecode_params)['OUTPUT']
-
+        field_calculator_typecode_results = processing.run('native:fieldcalculator', field_calculator_typecode_params)[
+            'OUTPUT']
 
         field_calculator_date_params = {
             'INPUT': field_calculator_typecode_results,
@@ -296,18 +295,15 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
 
         field_calculator_date_results = processing.run('native:fieldcalculator', field_calculator_date_params)['OUTPUT']
 
-
         fix_geometries_params = {
             'INPUT': field_calculator_date_results,
-            'OUTPUT': 'TEMPORARY_OUTPUT'
+            'OUTPUT': output
         }
-
 
         fix_geometries_results = processing.run('native:fixgeometries', fix_geometries_params)['OUTPUT']
 
-        QgsProject.instance().addMapLayer(fix_geometries_results)
 
-        return {self.OUTPUT: fix_geometries_results.id()}
+        return {self.OUTPUT: fix_geometries_results}
 
     def name(self):
         """
