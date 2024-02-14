@@ -38,7 +38,9 @@ from qgis.core import (QgsProcessing,
                        QgsProcessingParameterFeatureSink,
                        QgsProcessingParameterString,
                        QgsProcessingParameterDateTime,
-                       QgsProcessingParameterCrs)
+                       QgsProcessingParameterCrs,
+                       QgsProcessingException,
+                       QgsProcessingParameterDefinition)
 
 
 class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
@@ -60,8 +62,8 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
     # calling from the QGIS console.
 
     OUTPUT = 'OUTPUT'
-    INPUT = 'INPUT'
-    BBOX = 'BBOX'
+    INPUT_LAYER = 'INPUT_LAYER'
+    INPUT_BBOX = 'INPUT_BBOX'
     RASTER_DATE = "RASTER_DATE"
     OUTPUT_CRS = "OUTPUT_CRS"
     TYPE_CODES = "TYPE_CODES"
@@ -75,20 +77,29 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
 
         # We add the input vector features source. It can have any kind of
         # geometry.
-        self.addParameter(
-            QgsProcessingParameterFeatureSource(
-                self.INPUT,
+
+        input_layer_param = QgsProcessingParameterFeatureSource(
+                self.INPUT_LAYER,
                 self.tr('Input layer'),
                 [QgsProcessing.TypeVectorPolygon]
             )
-        )
+
+        input_layer_param.setFlags(input_layer_param.flags() | QgsProcessingParameterDefinition.FlagOptional)
 
         self.addParameter(
-            QgsProcessingParameterString(
-                self.BBOX,
+            input_layer_param
+        )
+
+        bbox_param = QgsProcessingParameterString(
+                self.INPUT_BBOX,
                 self.tr('Bounding box (with comma separated)'),
                 defaultValue = ''
             )
+
+        bbox_param.setFlags(bbox_param.flags() | QgsProcessingParameterDefinition.FlagOptional)
+
+        self.addParameter(
+            bbox_param
         )
 
         self.addParameter(
@@ -139,14 +150,21 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
         # Retrieve the feature source and sink. The 'dest_id' variable is used
         # to uniquely identify the feature sink, and must be included in the
         # dictionary returned by the processAlgorithm function.
-        source = self.parameterAsSource(parameters, self.INPUT, context)
+        source_layer = self.parameterAsSource(parameters, self.INPUT_LAYER, context)
+        source_bbox = self.parameterAsString(parameters, self.INPUT_BBOX, context)
+        type_codes = self.parameterAsString(parameters, self.TYPE_CODES, context).split(",")
+        type_codes_values = self.parameterAsString(parameters, self.TYPE_CODES_VALUES, context).split(",")
+        if not source_layer and not source_bbox:
+            raise QgsProcessingException('There must be at least source layer or source bounding box.')
+        if len(type_codes) != len(type_codes_values):
+            raise QgsProcessingException('The type codes and its values do not match.')
         (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT,
-                context, source.fields(), source.wkbType(), source.sourceCrs())
+                context, source_layer.fields(), source_layer.wkbType(), source_layer.sourceCrs())
 
         # Compute the number of steps to display within the progress bar and
         # get features from source
-        total = 100.0 / source.featureCount() if source.featureCount() else 0
-        features = source.getFeatures()
+        total = 100.0 / source_layer.featureCount() if source_layer.featureCount() else 0
+        features = source_layer.getFeatures()
 
         for current, feature in enumerate(features):
             # Stop the algorithm if cancel button has been clicked
