@@ -30,6 +30,7 @@ __copyright__ = '(C) 2024 by Leonid Kolesnichenko'
 
 __revision__ = '$Format:%H$'
 
+from qgis import processing
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.core import (QgsProcessing,
                        QgsFeatureSink,
@@ -40,7 +41,16 @@ from qgis.core import (QgsProcessing,
                        QgsProcessingParameterDateTime,
                        QgsProcessingParameterCrs,
                        QgsProcessingException,
-                       QgsProcessingParameterDefinition)
+                       QgsProcessingParameterDefinition,
+                       QgsCoordinateReferenceSystem,
+                       QgsRectangle,
+                       QgsGeometry,
+                       QgsFields,
+                       QgsField,
+                       QgsVectorLayer,
+                       QgsFeature)
+
+from PyQt5.QtCore import QVariant
 
 
 class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
@@ -152,12 +162,59 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
         # dictionary returned by the processAlgorithm function.
         source_layer = self.parameterAsSource(parameters, self.INPUT_LAYER, context)
         source_bbox = self.parameterAsString(parameters, self.INPUT_BBOX, context)
+        target_crs = self.parameterAsCrs(parameters, self.OUTPUT_CRS, context)
+        raster_date = self.parameterAsDateTime(parameters, self.RASTER_DATE, context)
         type_codes = self.parameterAsString(parameters, self.TYPE_CODES, context).split(",")
         type_codes_values = self.parameterAsString(parameters, self.TYPE_CODES_VALUES, context).split(",")
+
+        raster_year, raster_month, raster_day = raster_date.date().year(), raster_date.date().month(), raster_date.date().day()
+        raster_prd = f"66{str(raster_month).zfill(2)}{str(raster_day).zfill(2)}{raster_year}"
+        raster_prd_uri = f"https://usicecenter.gov/File/DownloadArchive?prd={raster_prd}"
+
         if not source_layer and not source_bbox:
             raise QgsProcessingException('There must be at least source layer or source bounding box.')
         if len(type_codes) != len(type_codes_values):
             raise QgsProcessingException('The type codes and its values do not match.')
+        vector_layer = source_layer
+        if source_bbox:
+            xmin, ymin, xmax, ymax = map(float, source_bbox.split(','))
+            bbox_rect = QgsRectangle(xmin, ymin, xmax, ymax)
+            bbox_geometry = QgsGeometry.fromRect(bbox_rect)
+
+            fields = QgsFields()
+            fields.append(QgsField('ID', QVariant.Int))
+
+            crs = QgsCoordinateReferenceSystem('EPSG:4326')
+            vector_layer = QgsVectorLayer('Polygon?crs=' + crs.toWkt(), 'BoundingBox', 'memory')
+            vector_layer_provider = vector_layer.dataProvider()
+            vector_layer_provider.addAttributes(fields)
+            vector_layer.updateFields()
+
+            feature = QgsFeature()
+            feature.setGeometry(bbox_geometry)
+            feature.setAttributes([1])
+
+            vector_layer_provider.addFeatures([feature])
+            vector_layer.updateExtents()
+            # TODO: get the geometry from bbox (gdal:cliprasterbymasklayer)
+
+        clip_raster_params = {
+            'INPUT': f'/vsigzip//vsicurl_streaming/{raster_prd_uri}',
+            'SOURCE_CRS': None,
+            'MASK': vector_layer,
+            'TARGET_CRS': QgsCoordinateReferenceSystem('EPSG:3857'),
+            'RESAMPLING': 0,
+            'NODATA': 0,
+            'TARGET_RESOLUTION': 1000,
+            'OPTIONS': '',
+            'DATA_TYPE': 0,
+            'TARGET_EXTENT': source_bbox if source_bbox else None,
+            'TARGET_EXTENT_CRS': target_crs,
+            'MULTITHREADING': True,
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+        clip_raster_result = processing.run("gdal:cliprasterbymasklayer", clip_raster_params, context, feedback)
+        print(clip_raster_result['TEMPORARY_OUTPUT'])
         (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT,
                 context, source_layer.fields(), source_layer.wkbType(), source_layer.sourceCrs())
 
