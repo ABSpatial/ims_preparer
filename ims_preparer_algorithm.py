@@ -189,7 +189,7 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
         if source_layer:
             vector_layer = source_layer
         if source_bbox:
-            xmin, ymin, xmax, ymax = map(float, source_bbox.split(','))
+            ymin, xmin, ymax, xmax = map(float, source_bbox.split(','))
             bbox_rect = QgsRectangle(xmin, ymin, xmax, ymax)
             bbox_geometry = QgsGeometry.fromRect(bbox_rect)
 
