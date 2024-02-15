@@ -48,9 +48,10 @@ from qgis.core import (QgsProcessing,
                        QgsFields,
                        QgsField,
                        QgsVectorLayer,
-                       QgsFeature)
+                       QgsFeature,
+                       QgsRasterLayer)
 
-from PyQt5.QtCore import QVariant
+from PyQt5.QtCore import QVariant, QDateTime
 
 
 class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
@@ -170,6 +171,13 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
         raster_year, raster_month, raster_day = raster_date.date().year(), raster_date.date().month(), raster_date.date().day()
         raster_prd = f"66{str(raster_month).zfill(2)}{str(raster_day).zfill(2)}{raster_year}"
         raster_prd_uri = f"https://usicecenter.gov/File/DownloadArchive?prd={raster_prd}"
+        today = QDateTime.currentDateTime()
+        year_condition = raster_date.date().year() >= today.date().year()
+        month_condition = raster_date.date().month() >= today.date().month()
+        day_condition = raster_date.date().day() >= today.date().day()
+
+        if all([year_condition, month_condition, day_condition]):
+            raise QgsProcessingException('The raster date must be yesterday or earlier.')
 
         if not source_layer and not source_bbox:
             raise QgsProcessingException('There must be at least source layer or source bounding box.')
@@ -198,8 +206,18 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
             vector_layer.updateExtents()
             # TODO: get the geometry from bbox (gdal:cliprasterbymasklayer)
 
+        file_downloader_params = {
+            'DATA': '',
+            'METHOD': 0,
+            'URL': raster_prd_uri,
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+
+        file_downloader_results = processing.run("native:filedownloader", file_downloader_params)['OUTPUT']
+        raster = QgsRasterLayer(f'/vsigzip/{file_downloader_results}', 'IMS Gzipped TIFF')
+
         clip_raster_params = {
-            'INPUT': f'/vsigzip//vsicurl_streaming/{raster_prd_uri}',
+            'INPUT': raster,
             'SOURCE_CRS': None,
             'MASK': vector_layer,
             'TARGET_CRS': QgsCoordinateReferenceSystem('EPSG:3857'),
@@ -213,34 +231,17 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
             'MULTITHREADING': True,
             'OUTPUT': 'TEMPORARY_OUTPUT'
         }
-        clip_raster_result = processing.run("gdal:cliprasterbymasklayer", clip_raster_params, context, feedback)
-        print(clip_raster_result['TEMPORARY_OUTPUT'])
-        (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT,
-                context, source_layer.fields(), source_layer.wkbType(), source_layer.sourceCrs())
+        clip_raster_result = processing.run("gdal:cliprasterbymasklayer", clip_raster_params)['OUTPUT']
 
-        # Compute the number of steps to display within the progress bar and
-        # get features from source
-        total = 100.0 / source_layer.featureCount() if source_layer.featureCount() else 0
-        features = source_layer.getFeatures()
+        polygonize_params = {
+            'INPUT': clip_raster_result,
+            'BAND': 1,
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
 
-        for current, feature in enumerate(features):
-            # Stop the algorithm if cancel button has been clicked
-            if feedback.isCanceled():
-                break
-
-            # Add a feature in the sink
-            sink.addFeature(feature, QgsFeatureSink.FastInsert)
-
-            # Update the progress bar
-            feedback.setProgress(int(current * total))
-
-        # Return the results of the algorithm. In this case our only result is
-        # the feature sink which contains the processed features, but some
-        # algorithms may return multiple feature sinks, calculated numeric
-        # statistics, etc. These should all be included in the returned
-        # dictionary, with keys matching the feature corresponding parameter
-        # or output names.
-        return {self.OUTPUT: dest_id}
+        polygonize_results = processing.run('gdal:polygonize', polygonize_params)['OUTPUT']
+        print(polygonize_results)
+        return {self.OUTPUT: polygonize_results}
 
     def name(self):
         """
