@@ -236,12 +236,47 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
         polygonize_params = {
             'INPUT': clip_raster_result,
             'BAND': 1,
-            'OUTPUT': 'TEMPORARY_OUTPUT'
+            'OUTPUT': 'TEMPORARY_OUTPUT',
+            'FIELD': 'TYPE_CODE'
         }
 
         polygonize_results = processing.run('gdal:polygonize', polygonize_params)['OUTPUT']
-        print(polygonize_results)
-        return {self.OUTPUT: polygonize_results}
+
+        extract_by_expression_params = {
+            'INPUT': polygonize_results,
+            'EXPRESSION': f'"TYPE_CODE"  IN ({",".join(type_codes)})',
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+
+        extract_by_expression_results = processing.run('native:extractbyexpression', extract_by_expression_params)['OUTPUT']
+
+        dissolve_params = {
+            'FIELD': 'TYPE_CODE',
+            'INPUT': extract_by_expression_results,
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+
+        dissolve_results = processing.run('native:dissolve', dissolve_params)['OUTPUT']
+
+        field_calculator_typecode_params = {
+            'INPUT': dissolve_results,
+            'FIELD_NAME': 'TYPE',
+            'FIELD_TYPE': 2,
+            'FIELD_LENGTH': 10,
+            'FIELD_PRECISION': 0,
+            'FORMULA': """
+            CASE
+            WHEN "TYPE_CODE" = 3 THEN 'Ice' 
+            WHEN "TYPE_CODE" = 4 THEN 'Show' 
+            END
+            """,
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+
+        field_calculator_typecode_results = processing.run('native:fieldcalculator', field_calculator_typecode_params)['OUTPUT']
+
+
+        return {self.OUTPUT: field_calculator_typecode_results}
 
     def name(self):
         """
