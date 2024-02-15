@@ -299,11 +299,12 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
 
         fix_geometries_params = {
             'INPUT': field_calculator_date_results,
-            'OUTPUT': output
+            'OUTPUT': 'TEMPORARY_OUTPUT'
         }
 
 
         fix_geometries_results = processing.run('native:fixgeometries', fix_geometries_params)['OUTPUT']
+
 
         total = 100.0 / fix_geometries_results.featureCount() if fix_geometries_results.featureCount() else 0
         (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT,
@@ -317,6 +318,7 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
                 # Add a feature in the sink
             sink.addFeature(feature, QgsFeatureSink.FastInsert)
             feedback.setProgress(int(current * total))
+
 
         return {self.OUTPUT: dest_id}
 
