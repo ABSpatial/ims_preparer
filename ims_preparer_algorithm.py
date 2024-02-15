@@ -50,7 +50,7 @@ from qgis.core import (QgsProcessing,
                        QgsVectorLayer,
                        QgsFeature,
                        QgsRasterLayer,
-                       QgsWkbTypes)
+                       QgsFeatureSink)
 
 
 class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
@@ -302,10 +302,23 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
             'OUTPUT': output
         }
 
+
         fix_geometries_results = processing.run('native:fixgeometries', fix_geometries_params)['OUTPUT']
 
+        total = 100.0 / fix_geometries_results.featureCount() if fix_geometries_results.featureCount() else 0
+        (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT,
+                                               context, fix_geometries_results.fields(), fix_geometries_results.wkbType(), fix_geometries_results.sourceCrs())
 
-        return {self.OUTPUT: fix_geometries_results}
+        features = fix_geometries_results.getFeatures()
+        for current, feature in enumerate(features):
+            if feedback.isCanceled():
+                break
+
+                # Add a feature in the sink
+            sink.addFeature(feature, QgsFeatureSink.FastInsert)
+            feedback.setProgress(int(current * total))
+
+        return {self.OUTPUT: dest_id}
 
     def name(self):
         """
