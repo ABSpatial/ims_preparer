@@ -50,7 +50,7 @@ from qgis.core import (QgsProcessing,
                        QgsVectorLayer,
                        QgsFeature,
                        QgsRasterLayer,
-                       QgsProject)
+                       QgsWkbTypes)
 
 
 class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
@@ -160,7 +160,7 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
         # Retrieve the feature source and sink. The 'dest_id' variable is used
         # to uniquely identify the feature sink, and must be included in the
         # dictionary returned by the processAlgorithm function.
-        source_layer = self.parameterAsSource(parameters, self.INPUT_LAYER, context)
+        source_layer = self.parameterAsVectorLayer(parameters, self.INPUT_LAYER, context)
         source_bbox = self.parameterAsString(parameters, self.INPUT_BBOX, context)
         target_crs = self.parameterAsCrs(parameters, self.OUTPUT_CRS, context)
         raster_date = self.parameterAsDateTime(parameters, self.RASTER_DATE, context)
@@ -182,9 +182,12 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
 
         if not source_layer and not source_bbox:
             raise QgsProcessingException('There must be at least source layer or source bounding box.')
+        if source_layer and source_bbox:
+            raise QgsProcessingException('There must only one source: or source layer, or source bounding box.')
         if len(type_codes) != len(type_codes_values):
             raise QgsProcessingException('The type codes and its values do not match.')
-        vector_layer = source_layer
+        if source_layer:
+            vector_layer = source_layer
         if source_bbox:
             xmin, ymin, xmax, ymax = map(float, source_bbox.split(','))
             bbox_rect = QgsRectangle(xmin, ymin, xmax, ymax)
@@ -205,7 +208,6 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
 
             vector_layer_provider.addFeatures([feature])
             vector_layer.updateExtents()
-            # TODO: get the geometry from bbox (gdal:cliprasterbymasklayer)
 
         file_downloader_params = {
             'DATA': '',
