@@ -275,8 +275,26 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
 
         field_calculator_typecode_results = processing.run('native:fieldcalculator', field_calculator_typecode_params)['OUTPUT']
 
+        field_calculator_date_params = {
+            'INPUT': field_calculator_typecode_results,
+            'FIELD_NAME': 'DATE',
+            'FIELD_TYPE': 3,
+            'FIELD_LENGTH': 10,
+            'FIELD_PRECISION': 0,
+            'FORMULA': f'{raster_year}-{raster_month}-{raster_day}',
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
 
-        return {self.OUTPUT: field_calculator_typecode_results}
+        field_calculator_date_results = processing.run('native:fieldcalculator', field_calculator_date_params)['OUTPUT']
+
+        fix_geometries_params = {
+            'INPUT': field_calculator_date_results,
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+
+        fix_geometries_results = processing.run('native:fixgeometries', fix_geometries_params)['OUTPUT']
+
+        return {self.OUTPUT: fix_geometries_results}
 
     def name(self):
         """
