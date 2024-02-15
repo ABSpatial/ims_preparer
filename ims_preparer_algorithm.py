@@ -30,10 +30,10 @@ __copyright__ = '(C) 2024 by Leonid Kolesnichenko'
 
 __revision__ = '$Format:%H$'
 
+from PyQt5.QtCore import QVariant, QDateTime
 from qgis import processing
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.core import (QgsProcessing,
-                       QgsFeatureSink,
                        QgsProcessingAlgorithm,
                        QgsProcessingParameterFeatureSource,
                        QgsProcessingParameterFeatureSink,
@@ -49,9 +49,8 @@ from qgis.core import (QgsProcessing,
                        QgsField,
                        QgsVectorLayer,
                        QgsFeature,
-                       QgsRasterLayer)
-
-from PyQt5.QtCore import QVariant, QDateTime
+                       QgsRasterLayer,
+                       QgsProject)
 
 
 class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
@@ -242,6 +241,8 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
 
         polygonize_results = processing.run('gdal:polygonize', polygonize_params)['OUTPUT']
 
+
+
         extract_by_expression_params = {
             'INPUT': polygonize_results,
             'EXPRESSION': f'"TYPE_CODE"  IN ({",".join(type_codes)})',
@@ -257,6 +258,12 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
         }
 
         dissolve_results = processing.run('native:dissolve', dissolve_params)['OUTPUT']
+        whens = []
+        for idx, val in zip(type_codes, type_codes_values):
+            whens.append(
+                f"""WHEN "TYPE_CODE" = {idx} THEN '{val}'"""
+            )
+        whens = "\n".join(whens)
 
         field_calculator_typecode_params = {
             'INPUT': dissolve_results,
@@ -264,10 +271,9 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
             'FIELD_TYPE': 2,
             'FIELD_LENGTH': 10,
             'FIELD_PRECISION': 0,
-            'FORMULA': """
+            'FORMULA': f"""
             CASE
-            WHEN "TYPE_CODE" = 3 THEN 'Ice' 
-            WHEN "TYPE_CODE" = 4 THEN 'Show' 
+            {whens} 
             END
             """,
             'OUTPUT': 'TEMPORARY_OUTPUT'
@@ -275,24 +281,29 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
 
         field_calculator_typecode_results = processing.run('native:fieldcalculator', field_calculator_typecode_params)['OUTPUT']
 
+
         field_calculator_date_params = {
             'INPUT': field_calculator_typecode_results,
             'FIELD_NAME': 'DATE',
             'FIELD_TYPE': 3,
             'FIELD_LENGTH': 10,
             'FIELD_PRECISION': 0,
-            'FORMULA': f'{raster_year}-{raster_month}-{raster_day}',
+            'FORMULA': f"'{str(raster_year)}-{str(raster_month).zfill(2)}-{str(raster_day).zfill(2)}'",
             'OUTPUT': 'TEMPORARY_OUTPUT'
         }
 
         field_calculator_date_results = processing.run('native:fieldcalculator', field_calculator_date_params)['OUTPUT']
+
 
         fix_geometries_params = {
             'INPUT': field_calculator_date_results,
             'OUTPUT': 'TEMPORARY_OUTPUT'
         }
 
+
         fix_geometries_results = processing.run('native:fixgeometries', fix_geometries_params)['OUTPUT']
+
+        QgsProject.instance().addMapLayer(fix_geometries_results)
 
         return {self.OUTPUT: fix_geometries_results}
 
