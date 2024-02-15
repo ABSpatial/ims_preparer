@@ -167,6 +167,8 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
         type_codes = self.parameterAsString(parameters, self.TYPE_CODES, context).split(",")
         type_codes_values = self.parameterAsString(parameters, self.TYPE_CODES_VALUES, context).split(",")
 
+
+
         raster_year, raster_month, raster_day = raster_date.date().year(), raster_date.date().month(), raster_date.date().day()
         raster_prd = f"66{str(raster_month).zfill(2)}{str(raster_day).zfill(2)}{raster_year}"
         raster_prd_uri = f"https://usicecenter.gov/File/DownloadArchive?prd={raster_prd}"
@@ -305,7 +307,7 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
 
         QgsProject.instance().addMapLayer(fix_geometries_results)
 
-        return {self.OUTPUT: fix_geometries_results}
+        return {self.OUTPUT: fix_geometries_results.id()}
 
     def name(self):
         """
