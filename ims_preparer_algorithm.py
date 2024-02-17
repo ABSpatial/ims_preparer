@@ -30,15 +30,27 @@ __copyright__ = '(C) 2024 by Leonid Kolesnichenko'
 
 __revision__ = '$Format:%H$'
 
+from PyQt5.QtCore import QVariant, QDateTime
+from qgis import processing
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.core import (QgsProcessing,
-                       QgsFeatureSink,
                        QgsProcessingAlgorithm,
                        QgsProcessingParameterFeatureSource,
                        QgsProcessingParameterFeatureSink,
                        QgsProcessingParameterString,
                        QgsProcessingParameterDateTime,
-                       QgsProcessingParameterCrs)
+                       QgsProcessingParameterCrs,
+                       QgsProcessingException,
+                       QgsProcessingParameterDefinition,
+                       QgsCoordinateReferenceSystem,
+                       QgsRectangle,
+                       QgsGeometry,
+                       QgsFields,
+                       QgsField,
+                       QgsVectorLayer,
+                       QgsFeature,
+                       QgsRasterLayer,
+                       QgsFeatureSink)
 
 
 class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
@@ -60,8 +72,8 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
     # calling from the QGIS console.
 
     OUTPUT = 'OUTPUT'
-    INPUT = 'INPUT'
-    BBOX = 'BBOX'
+    INPUT_LAYER = 'INPUT_LAYER'
+    INPUT_BBOX = 'INPUT_BBOX'
     RASTER_DATE = "RASTER_DATE"
     OUTPUT_CRS = "OUTPUT_CRS"
     TYPE_CODES = "TYPE_CODES"
@@ -75,20 +87,29 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
 
         # We add the input vector features source. It can have any kind of
         # geometry.
-        self.addParameter(
-            QgsProcessingParameterFeatureSource(
-                self.INPUT,
-                self.tr('Input layer'),
-                [QgsProcessing.TypeVectorPolygon]
-            )
+
+        input_layer_param = QgsProcessingParameterFeatureSource(
+            self.INPUT_LAYER,
+            self.tr('Input layer'),
+            [QgsProcessing.TypeVectorPolygon]
         )
 
+        input_layer_param.setFlags(input_layer_param.flags() | QgsProcessingParameterDefinition.FlagOptional)
+
         self.addParameter(
-            QgsProcessingParameterString(
-                self.BBOX,
-                self.tr('Bounding box (with comma separated)'),
-                defaultValue = ''
-            )
+            input_layer_param
+        )
+
+        bbox_param = QgsProcessingParameterString(
+            self.INPUT_BBOX,
+            self.tr('Bounding box (with comma separated)'),
+            defaultValue=''
+        )
+
+        bbox_param.setFlags(bbox_param.flags() | QgsProcessingParameterDefinition.FlagOptional)
+
+        self.addParameter(
+            bbox_param
         )
 
         self.addParameter(
@@ -139,32 +160,166 @@ class IMSPreparerAlgorithm(QgsProcessingAlgorithm):
         # Retrieve the feature source and sink. The 'dest_id' variable is used
         # to uniquely identify the feature sink, and must be included in the
         # dictionary returned by the processAlgorithm function.
-        source = self.parameterAsSource(parameters, self.INPUT, context)
+        source_layer = self.parameterAsVectorLayer(parameters, self.INPUT_LAYER, context)
+        source_bbox = self.parameterAsString(parameters, self.INPUT_BBOX, context)
+        target_crs = self.parameterAsCrs(parameters, self.OUTPUT_CRS, context)
+        raster_date = self.parameterAsDateTime(parameters, self.RASTER_DATE, context)
+        type_codes = self.parameterAsString(parameters, self.TYPE_CODES, context).split(",")
+        type_codes_values = self.parameterAsString(parameters, self.TYPE_CODES_VALUES, context).split(",")
+
+        output = self.parameterAsOutputLayer(parameters, self.OUTPUT, context)
+
+        raster_year, raster_month, raster_day = raster_date.date().year(), raster_date.date().month(), raster_date.date().day()
+        raster_prd = f"66{str(raster_month).zfill(2)}{str(raster_day).zfill(2)}{raster_year}"
+        raster_prd_uri = f"https://usicecenter.gov/File/DownloadArchive?prd={raster_prd}"
+        today = QDateTime.currentDateTime()
+        year_condition = raster_date.date().year() >= today.date().year()
+        month_condition = raster_date.date().month() >= today.date().month()
+        day_condition = raster_date.date().day() >= today.date().day()
+
+        if all([year_condition, month_condition, day_condition]):
+            raise QgsProcessingException('The raster date must be yesterday or earlier.')
+
+        if not source_layer and not source_bbox:
+            raise QgsProcessingException('There must be at least source layer or source bounding box.')
+        if source_layer and source_bbox:
+            raise QgsProcessingException('There must only one source: or source layer, or source bounding box.')
+        if len(type_codes) != len(type_codes_values):
+            raise QgsProcessingException('The type codes and its values do not match.')
+        if source_layer:
+            vector_layer = source_layer
+        if source_bbox:
+            ymin, xmin, ymax, xmax = map(float, source_bbox.split(','))
+            bbox_rect = QgsRectangle(xmin, ymin, xmax, ymax)
+            bbox_geometry = QgsGeometry.fromRect(bbox_rect)
+
+            fields = QgsFields()
+            fields.append(QgsField('ID', QVariant.Int))
+
+            crs = QgsCoordinateReferenceSystem('EPSG:4326')
+            vector_layer = QgsVectorLayer('Polygon?crs=' + crs.toWkt(), 'BoundingBox', 'memory')
+            vector_layer_provider = vector_layer.dataProvider()
+            vector_layer_provider.addAttributes(fields)
+            vector_layer.updateFields()
+
+            feature = QgsFeature()
+            feature.setGeometry(bbox_geometry)
+            feature.setAttributes([1])
+
+            vector_layer_provider.addFeatures([feature])
+            vector_layer.updateExtents()
+
+        file_downloader_params = {
+            'DATA': '',
+            'METHOD': 0,
+            'URL': raster_prd_uri,
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+
+        file_downloader_results = processing.run("native:filedownloader", file_downloader_params)['OUTPUT']
+        raster = QgsRasterLayer(f'/vsigzip/{file_downloader_results}', 'IMS Gzipped TIFF')
+
+        clip_raster_params = {
+            'INPUT': raster,
+            'SOURCE_CRS': None,
+            'MASK': vector_layer,
+            'TARGET_CRS': QgsCoordinateReferenceSystem('EPSG:3857'),
+            'RESAMPLING': 0,
+            'NODATA': 0,
+            'TARGET_RESOLUTION': 1000,
+            'OPTIONS': '',
+            'DATA_TYPE': 0,
+            'TARGET_EXTENT': source_bbox if source_bbox else None,
+            'TARGET_EXTENT_CRS': target_crs,
+            'MULTITHREADING': True,
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+        clip_raster_result = processing.run("gdal:cliprasterbymasklayer", clip_raster_params)['OUTPUT']
+
+        polygonize_params = {
+            'INPUT': clip_raster_result,
+            'BAND': 1,
+            'OUTPUT': 'TEMPORARY_OUTPUT',
+            'FIELD': 'TYPE_CODE'
+        }
+
+        polygonize_results = processing.run('gdal:polygonize', polygonize_params)['OUTPUT']
+
+        extract_by_expression_params = {
+            'INPUT': polygonize_results,
+            'EXPRESSION': f'"TYPE_CODE"  IN ({",".join(type_codes)})',
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+
+        extract_by_expression_results = processing.run('native:extractbyexpression', extract_by_expression_params)[
+            'OUTPUT']
+
+        dissolve_params = {
+            'FIELD': 'TYPE_CODE',
+            'INPUT': extract_by_expression_results,
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+
+        dissolve_results = processing.run('native:dissolve', dissolve_params)['OUTPUT']
+        whens = []
+        for idx, val in zip(type_codes, type_codes_values):
+            whens.append(
+                f"""WHEN "TYPE_CODE" = {idx} THEN '{val}'"""
+            )
+        whens = "\n".join(whens)
+
+        field_calculator_typecode_params = {
+            'INPUT': dissolve_results,
+            'FIELD_NAME': 'TYPE',
+            'FIELD_TYPE': 2,
+            'FIELD_LENGTH': 10,
+            'FIELD_PRECISION': 0,
+            'FORMULA': f"""
+            CASE
+            {whens} 
+            END
+            """,
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+
+        field_calculator_typecode_results = processing.run('native:fieldcalculator', field_calculator_typecode_params)[
+            'OUTPUT']
+
+        field_calculator_date_params = {
+            'INPUT': field_calculator_typecode_results,
+            'FIELD_NAME': 'DATE',
+            'FIELD_TYPE': 3,
+            'FIELD_LENGTH': 10,
+            'FIELD_PRECISION': 0,
+            'FORMULA': f"'{str(raster_year)}-{str(raster_month).zfill(2)}-{str(raster_day).zfill(2)}'",
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+
+        field_calculator_date_results = processing.run('native:fieldcalculator', field_calculator_date_params)['OUTPUT']
+
+        fix_geometries_params = {
+            'INPUT': field_calculator_date_results,
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+
+
+        fix_geometries_results = processing.run('native:fixgeometries', fix_geometries_params)['OUTPUT']
+
+
+        total = 100.0 / fix_geometries_results.featureCount() if fix_geometries_results.featureCount() else 0
         (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT,
-                context, source.fields(), source.wkbType(), source.sourceCrs())
+                                               context, fix_geometries_results.fields(), fix_geometries_results.wkbType(), fix_geometries_results.sourceCrs())
 
-        # Compute the number of steps to display within the progress bar and
-        # get features from source
-        total = 100.0 / source.featureCount() if source.featureCount() else 0
-        features = source.getFeatures()
-
+        features = fix_geometries_results.getFeatures()
         for current, feature in enumerate(features):
-            # Stop the algorithm if cancel button has been clicked
             if feedback.isCanceled():
                 break
 
-            # Add a feature in the sink
+                # Add a feature in the sink
             sink.addFeature(feature, QgsFeatureSink.FastInsert)
-
-            # Update the progress bar
             feedback.setProgress(int(current * total))
 
-        # Return the results of the algorithm. In this case our only result is
-        # the feature sink which contains the processed features, but some
-        # algorithms may return multiple feature sinks, calculated numeric
-        # statistics, etc. These should all be included in the returned
-        # dictionary, with keys matching the feature corresponding parameter
-        # or output names.
+
         return {self.OUTPUT: dest_id}
 
     def name(self):
