@@ -1,0 +1,6 @@
+pendulum
+rasterio
+geopandas
+requests
+tqdm
+shapely
