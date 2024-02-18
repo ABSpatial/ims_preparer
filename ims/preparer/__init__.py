@@ -72,16 +72,19 @@ def prepare(input_layer_path, input_layername, raster_date, output_crs, type_cod
         with rasterio.open(out_temp_reprojected.name) as src:
             image = src.read(1)
             transform = src.transform
-        results = (
-            {'properties': {'TYPE_CODE': v if v not in type_codes else type_codes[v], "TYPE": v, 'DATE': raster_date}, 'geometry': s}
-            for i, (s, v) in enumerate(
-            rasterio.features.shapes(
-                image, transform=transform)) if v > 0)
-        gdf = gpd.GeoDataFrame.from_features(list(results))
+        results = []
+        for i, (s,v) in enumerate(rasterio.features.shapes(
+            image, transform=transform
+        )):
+            if v > 0:
+                results.append(
+                    {'properties': {'TYPE_CODE': int(v), "TYPE": type_codes.get(int(v), None), 'DATE': raster_date}, 'geometry': s}
+                )
+        gdf = gpd.GeoDataFrame.from_features(results)
         gdf.crs = src.crs
 
-        type_code_values = list(type_codes.values())
-        extracted_gdf = gdf[gdf['TYPE_CODE'].isin(type_code_values)].dissolve(by='TYPE_CODE')
+        type_code_keys = list(type_codes.keys())
+        extracted_gdf = gdf[gdf['TYPE_CODE'].isin(type_code_keys)].dissolve(by='TYPE_CODE')
         extracted_gdf.to_file(output_layer_path)
 
         out_temp_reprojected.close()
