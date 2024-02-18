@@ -81,7 +81,7 @@ def prepare(input_layer_path, input_layername, raster_date, output_crs, type_cod
         gdf.crs = src.crs
 
         type_code_values = list(type_codes.values())
-        extracted_gdf = gdf[gdf['TYPE_CODE'].isin(type_code_values)]
+        extracted_gdf = gdf[gdf['TYPE_CODE'].isin(type_code_values)].dissolve(by='TYPE_CODE')
         extracted_gdf.to_file(output_layer_path)
 
         out_temp_reprojected.close()
