@@ -2,7 +2,7 @@ import pendulum
 
 from ims.preparer import prepare
 
-input_layer = "./ims/preparer/central_asia_boundary.gpkg"
+input_layer = "/ims/ims/preparer/central_asia_boundary.gpkg"
 layer_name = "central_asia_boundary"
 raster_date = pendulum.now("UTC").subtract(days=1).format("YYYY-MM-DD")
 output_crs = "EPSG:3857"
