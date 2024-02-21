@@ -1,3 +1,5 @@
+import os
+import subprocess
 import pendulum
 
 from ims.preparer import prepare
@@ -13,8 +15,8 @@ type_codes = {
 output_path = f"/tmp/{raster_date}.gpkg"
 NGW_LAYER_URL = "https://gis.abspatial.com/resource/1052"
 NGW_LAYER_NAME = "IMS_vector_multipolygon"
-login="user" # сделать хранение более безопасным
-password="password" # сделать хранение более безопасным
+login="Leonid_K" # сделать хранение более безопасным
+password="c83Ad-D3c_7e97C5" # сделать хранение более безопасным
 
 
 prepare(input_layer, layer_name, raster_date, output_crs, type_codes, output_path)
