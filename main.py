@@ -37,4 +37,6 @@ cmd = [
 
 subprocess.run(cmd, check=True)
 
+print("NGW uploading process finished")
+
 os.remove(output_path)
